@@ -1,351 +1,236 @@
-# Financial Agent - Amazon Stock Analysis with LangGraph
+# Financial Analysis Agent with LangGraph
 
-A production-ready financial analysis agent built with LangGraph, featuring RAG over Amazon earnings reports, real-time stock data, AWS deployment with Terraform, and Cognito authentication.
+An end-to-end AI agent for financial research built with LangGraph, OpenAI, RAG, external market-data tools, observability, authentication, and infrastructure as code.
 
-## Features
+The project combines live market data with retrieval over Amazon earnings reports so the agent can answer questions that require both current information and grounded company context.
 
-- **LangGraph Agent**: Intelligent agent with tool calling and reasoning
-- **Stock Analysis Tools**: Real-time and historical stock prices via yfinance
-- **RAG System**: Semantic search over Amazon Q2 and Q3 2025 earnings reports
-- **Event Streaming**: Responses streamed via `.astream()`
-- **AWS Cognito**: Secure user authentication
-- **Langfuse Tracing**: Complete observability of agent interactions
-- **Terraform Infrastructure**: Automated AWS deployment
+## What this project demonstrates
+
+- **Agent orchestration with LangGraph** using tool calling and conditional routing
+- **RAG over financial reports** with OpenAI embeddings and FAISS
+- **External tools** for real-time and historical stock data via `yfinance`
+- **Observability** with Langfuse tracing
+- **AWS deployment architecture** using Lambda, API Gateway, Cognito, S3, and IAM
+- **Infrastructure as code** with Terraform
+- **Local and deployed execution paths**
+- **Automated tests** for core tool and retrieval behavior
 
 ## Architecture
 
-```
+```text
 User Request
-    ↓
+    |
+    v
 AWS Cognito Authentication
-    ↓
-API Gateway (with Cognito Authorizer)
-    ↓
-AWS Lambda (Financial Agent)
-    ↓
+    |
+    v
+API Gateway
+    |
+    v
+AWS Lambda
+    |
+    v
 LangGraph Agent
-    ├── retrieve_realtime_stock_price (yfinance)
-    ├── retrieve_historical_stock_price (yfinance)
-    └── search_amazon_reports (RAG/FAISS)
-    ↓
-Langfuse Tracing
-    ↓
-Response
+    |-- retrieve_realtime_stock_price
+    |-- retrieve_historical_stock_price
+    `-- search_amazon_reports
+            |
+            v
+        RAG / FAISS
+            |
+            v
+   Amazon Earnings Reports
+
+Agent execution -> Langfuse tracing
 ```
 
-## Prerequisites
+## Agent flow
 
-- Python 3.11+
-- AWS Account with CLI configured
-- Terraform >= 1.0
-- OpenAI API Key
-- Langfuse Account (free at https://cloud.langfuse.com)
+The LangGraph workflow alternates between the LLM and tool execution until no further tool calls are requested:
 
-## Quick Start
+```text
+START -> agent -> tools -> agent -> ... -> END
+```
 
-### 1. Clone and Setup
+The current implementation uses `gpt-4o-mini` with deterministic temperature settings and binds three tools to the model: two market-data tools and one retrieval tool.
+
+## RAG pipeline
+
+```text
+Amazon earnings PDFs
+        |
+        v
+PDF extraction
+        |
+        v
+Recursive text splitting
+        |
+        v
+OpenAI embeddings
+        |
+        v
+FAISS vector index
+        |
+        v
+Similarity search
+        |
+        v
+Grounded context returned to the agent
+```
+
+The index is persisted locally so it can be reused between runs. For a production deployment, a pre-built index or managed vector store would be preferable to rebuilding retrieval assets during application startup.
+
+## Project structure
+
+```text
+.
+├── src/
+│   ├── agent.py              # LangGraph orchestration
+│   ├── tools.py              # Market-data tools
+│   ├── rag.py                # Retrieval pipeline
+│   └── lambda_handler.py     # AWS Lambda entry point
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+├── scripts/
+│   ├── build_lambda.sh
+│   ├── build_lambda.ps1
+│   ├── deploy.sh
+│   └── deploy.ps1
+├── tests/                    # Unit tests for core behavior
+├── demo_notebook.ipynb       # End-to-end demo
+├── local_test.py             # Local smoke test
+├── requirements.txt
+└── .env.example
+```
+
+## Local setup
+
+### 1. Clone and create an environment
 
 ```bash
-cd teste
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+git clone https://github.com/AdailtonHolanda/tech_challenge.git
+cd tech_challenge
+python -m venv .venv
+```
+
+Activate the environment:
+
+```bash
+# Linux / macOS
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-
-Copy `.env.example` to `.env` and fill in your credentials:
+### 3. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Required values include:
+
 ```env
-OPENAI_API_KEY=sk-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...
+OPENAI_API_KEY=...
+LANGFUSE_SECRET_KEY=...
+LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_HOST=https://cloud.langfuse.com
 AWS_REGION=us-east-1
 ```
 
-### 3. Test Locally (Optional)
+### 4. Run locally
 
 ```bash
 python local_test.py
 ```
 
-This will:
-- Download Amazon earnings PDFs
-- Create FAISS vector store
-- Run test queries locally
+On the first run, the retrieval component downloads the configured Amazon earnings reports and creates the local FAISS index.
 
-### 4. Deploy to AWS
+## Example questions
 
-#### Configure Terraform Variables
+The agent can handle questions such as:
+
+- What is Amazon's current stock price?
+- How has AMZN performed over the last three months?
+- What do recent earnings reports say about Amazon's AI business?
+- Combine the current stock price with relevant information from recent reports.
+- What financial or operating information is reported in the indexed documents?
+
+## Tests
+
+Run the unit tests with:
+
+```bash
+pytest -q
+```
+
+The tests mock external APIs so core behavior can be validated without calling Yahoo Finance or OpenAI.
+
+## AWS deployment
+
+The Terraform configuration provisions the main infrastructure required to expose the agent behind an authenticated API:
+
+- AWS Lambda
+- API Gateway
+- Cognito User Pool and authorizer
+- S3 deployment bucket
+- IAM roles and policies
+
+Build and deploy with the scripts under `scripts/`, or run Terraform directly.
 
 ```bash
 cd terraform
-cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform plan
+terraform apply
 ```
 
-Edit `terraform.tfvars` with your values:
-```hcl
-aws_region          = "us-east-1"
-project_name        = "financial-agent"
-environment         = "prod"
-openai_api_key      = "sk-..."
-langfuse_secret_key = "sk-lf-..."
-langfuse_public_key = "pk-lf-..."
-```
+After deployment, use the Terraform outputs to configure the demo notebook with the API endpoint and Cognito identifiers.
 
-#### Build and Deploy
+## Observability
 
-**On Linux/Mac:**
-```bash
-chmod +x scripts/*.sh
-./scripts/deploy.sh
-```
+Langfuse is integrated into the LLM execution path to capture traces for model calls, tool invocations, latency, token usage, and conversation flow. This makes it easier to debug agent behavior and inspect how requests are resolved.
 
-**On Windows:**
-```powershell
-.\scripts\deploy.ps1
-```
+## Streaming note
 
-This will:
-1. Build Lambda deployment package
-2. Initialize Terraform
-3. Create AWS resources:
-   - Lambda function
-   - API Gateway with Cognito authorizer
-   - Cognito User Pool
-   - S3 bucket for deployment
-4. Output deployment details
+The LangGraph layer supports asynchronous event iteration with `.astream()`. The current REST/Lambda response path returns a completed response to the client rather than maintaining a true streaming HTTP connection. A production streaming API could use an appropriate streaming transport such as WebSockets, Server-Sent Events, or a platform-specific streaming response mechanism.
 
-### 5. Create Cognito User
+## Production considerations
 
-After deployment, create a test user:
+This repository demonstrates a complete application path, but several improvements would be appropriate for a higher-scale production system:
 
-```bash
-# Get outputs from Terraform
-cd terraform
-terraform output
+- build and version the vector index outside Lambda cold starts;
+- store retrieval assets in durable/shared infrastructure;
+- add retries, timeouts, and circuit-breaking around external services;
+- introduce structured evaluation for retrieval quality and answer faithfulness;
+- add rate limiting and request-level telemetry;
+- use secret-management infrastructure instead of deployment variables for sensitive values;
+- add CI/CD and integration tests for the deployed API;
+- use a true streaming transport when token/event streaming is required by the client.
 
-# Create user
-aws cognito-idp admin-create-user \
-  --user-pool-id <COGNITO_USER_POOL_ID> \
-  --username your-email@example.com \
-  --user-attributes Name=email,Value=your-email@example.com \
-  --message-action SUPPRESS
+## Design decisions
 
-# Set permanent password
-aws cognito-idp admin-set-user-password \
-  --user-pool-id <COGNITO_USER_POOL_ID> \
-  --username your-email@example.com \
-  --password YourSecurePassword123! \
-  --permanent
-```
+**Why LangGraph?** It makes the agent state and tool-routing loop explicit rather than hiding orchestration inside a single opaque call.
 
-### 6. Update .env with Deployment Info
+**Why FAISS?** It provides a lightweight vector-search implementation that is easy to run locally and sufficient for demonstrating the retrieval architecture.
 
-Add the deployment outputs to your `.env`:
+**Why separate tools from retrieval?** Market prices and historical time series are dynamic data sources, while earnings reports are document-based knowledge. Treating them as separate tools allows the agent to choose the appropriate source for each question.
 
-```env
-API_ENDPOINT=https://xxxxx.execute-api.us-east-1.amazonaws.com/prod/query
-COGNITO_USER_POOL_ID=us-east-1_xxxxx
-COGNITO_CLIENT_ID=xxxxxxxxxxxxx
-```
+**Why Terraform?** Infrastructure as code makes the deployment architecture reproducible and reviewable alongside the application code.
 
-### 7. Run Demo Notebook
+## Tech stack
 
-```bash
-jupyter notebook demo_notebook.ipynb
-```
-
-The notebook will:
-- Authenticate with Cognito
-- Execute all test queries
-- Display responses
-- Show Langfuse traces
-
-## Test Queries
-
-The system handles these queries (as per requirements):
-
-1. **Real-time Price**: "What is the stock price for Amazon right now?"
-2. **Historical Data**: "What were the stock prices for Amazon in Q4 last year?"
-3. **Performance Analysis**: "Compare Amazon's recent stock performance to what analysts predicted in their reports"
-4. **AI Business Research**: "I'm researching AMZN give me the current price and any relevant information about their AI business"
-5. **Office Space**: "What is the total amount of office space Amazon owned in North America in 2024?"
-
-## Project Structure
-
-```
-teste/
-├── src/
-│   ├── __init__.py
-│   ├── agent.py              # LangGraph agent implementation
-│   ├── tools.py              # Stock price tools (yfinance)
-│   ├── rag.py                # RAG system for Amazon reports
-│   └── lambda_handler.py     # AWS Lambda handler
-├── terraform/
-│   ├── main.tf               # Main infrastructure
-│   ├── variables.tf          # Input variables
-│   ├── outputs.tf            # Output values
-│   └── terraform.tfvars      # Your configuration
-├── scripts/
-│   ├── build_lambda.sh       # Build Lambda package (Linux/Mac)
-│   ├── build_lambda.ps1      # Build Lambda package (Windows)
-│   ├── deploy.sh             # Full deployment (Linux/Mac)
-│   └── deploy.ps1            # Full deployment (Windows)
-├── demo_notebook.ipynb       # Demo with all test queries
-├── local_test.py             # Local testing script
-├── requirements.txt          # Python dependencies
-├── .env.example              # Environment template
-└── README.md                 # This file
-```
-
-## Tools Implemented
-
-### 1. retrieve_realtime_stock_price
-- Uses yfinance API
-- Returns current price, market cap, day range, volume
-- Example: `retrieve_realtime_stock_price("AMZN")`
-
-### 2. retrieve_historical_stock_price
-- Uses yfinance API
-- Supports date ranges or periods (1mo, 3mo, 1y, ytd)
-- Returns price statistics and changes
-- Example: `retrieve_historical_stock_price("AMZN", period="3mo")`
-
-### 3. search_amazon_reports (RAG)
-- Searches Amazon Q2 and Q3 2025 earnings reports
-- Uses FAISS vector store with OpenAI embeddings
-- Returns relevant document chunks with sources
-
-## Langfuse Tracing
-
-All agent interactions are traced in Langfuse:
-
-1. Go to https://cloud.langfuse.com
-2. View your project
-3. See traces for:
-   - LLM calls
-   - Tool invocations
-   - Token usage
-   - Latency metrics
-   - Full conversation flow
-
-## Infrastructure Details
-
-### AWS Resources Created
-
-- **Lambda Function**: Runs the financial agent (Python 3.11, 1GB RAM, 5min timeout)
-- **API Gateway**: REST API with Cognito authorization
-- **Cognito User Pool**: User authentication and management
-- **S3 Bucket**: Stores Lambda deployment package
-- **IAM Roles**: Lambda execution role with necessary permissions
-
-### Cost Estimate
-
-- Lambda: ~$0.20 per 1M requests + compute time
-- API Gateway: ~$3.50 per 1M requests
-- Cognito: Free tier covers 50,000 MAUs
-- S3: Minimal storage costs
-
-## Streaming Implementation
-
-The agent uses LangGraph's `.astream()` for event streaming:
-
-```python
-async for event in agent.astream(query):
-    # Process streaming events
-    messages = event.get('messages', [])
-    # Handle each event
-```
-
-Events are filtered by LLM invocation as per LangGraph documentation.
-
-## Troubleshooting
-
-### Lambda Package Too Large
-
-If the Lambda package exceeds 50MB:
-1. Use Lambda Layers for heavy dependencies
-2. Or deploy via S3 (already configured in Terraform)
-
-### RAG Setup Issues
-
-If PDF download fails:
-1. Check internet connection
-2. Manually download PDFs to `pdfs/` directory
-3. Run `local_test.py` to create vector store
-
-### Cognito Authentication Errors
-
-- Ensure user is confirmed
-- Check password meets requirements (8+ chars, uppercase, lowercase, number, symbol)
-- Verify client ID and user pool ID are correct
-
-### Langfuse Not Showing Traces
-
-- Verify API keys in `.env`
-- Check Langfuse project is active
-- Ensure callbacks are passed to LLM initialization
-
-## Development
-
-### Adding New Tools
-
-1. Define tool in `src/tools.py`:
-```python
-@tool
-def my_new_tool(param: str) -> str:
-    """Tool description"""
-    # Implementation
-    return result
-```
-
-2. Add to agent in `src/agent.py`:
-```python
-self.tools = [
-    retrieve_realtime_stock_price,
-    retrieve_historical_stock_price,
-    self.rag_tool,
-    my_new_tool  # Add here
-]
-```
-
-### Updating RAG Documents
-
-1. Add PDFs to `pdfs/` directory
-2. Update `src/rag.py` to include new sources
-3. Rebuild vector store
-
-## Cleanup
-
-To destroy all AWS resources:
-
-```bash
-cd terraform
-terraform destroy
-```
+Python · LangGraph · LangChain · OpenAI · FAISS · yfinance · Langfuse · AWS Lambda · API Gateway · Cognito · S3 · Terraform · Pytest
 
 ## License
 
 MIT
-
-## Support
-
-For issues or questions:
-1. Check the troubleshooting section
-2. Review Langfuse traces for debugging
-3. Check CloudWatch logs for Lambda errors
-
-## Acknowledgments
-
-- LangChain/LangGraph for agent framework
-- OpenAI for LLM capabilities
-- Langfuse for observability
-- yfinance for stock data
-- AWS for infrastructure
